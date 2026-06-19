@@ -1,0 +1,52 @@
+name: Propose new passages
+
+# AUTO-PULL, review-gated. Reads data/queue.json, fetches verbatim public-domain
+# text, drafts new entries, and opens a Pull Request. Nothing reaches the live site
+# until you review the draft (write the analysis) and merge.
+#
+# Run it by hand from the Actions tab, or on a schedule (weekly example below).
+# Requires: Settings > Actions > General > Workflow permissions = Read and write,
+# and "Allow GitHub Actions to create and approve pull requests" enabled.
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "0 8 * * 1"   # Mondays 08:00 UTC
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Pull verbatim passages from the queue
+        run: node scripts/ingest.mjs
+
+      - name: Regenerate site data
+        run: node scripts/build.mjs
+
+      - name: Open a pull request with the drafts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "No new passages to propose."
+            exit 0
+          fi
+          BRANCH="ingest/$(date -u +%Y%m%d-%H%M%S)"
+          git config user.name "mythos-bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add data/
+          git commit -m "Propose new passages from queue"
+          git push -u origin "$BRANCH"
+          gh pr create --fill \
+            --title "New myth drafts for review" \
+            --body "Auto-pulled verbatim public-domain passages from \`data/queue.json\`. Each new entry has the source text filled in and the analysis fields marked TODO. Review, write the deep-dive, and merge."
